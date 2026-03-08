@@ -1,5 +1,6 @@
 from html.parser import HTMLParser
 from collections import Counter
+import html
 import json
 import math
 import os
@@ -41,6 +42,58 @@ class MyHTMLParser(HTMLParser):
             for token_type, token_value in tokens:
                 if token_type == "WORD":
                     self.word_counts[token_value.lower()] += 1
+
+
+class PlainTextHTMLParser(HTMLParser):
+    CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
+    WHITESPACE = re.compile(r"\s+")
+
+    def __init__(self):
+        super().__init__()
+        self.parts = []
+        self.main_parts = []
+        self._skip_depth = 0
+        self._main_depth = 0
+
+    @staticmethod
+    def _attrs_to_dict(attrs):
+        return {key: value for key, value in attrs if key}
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"script", "style"}:
+            self._skip_depth += 1
+            return
+
+        attr_map = self._attrs_to_dict(attrs)
+        class_names = set((attr_map.get("class") or "").split())
+        is_main_container = attr_map.get("role") == "main" or "body" in class_names
+        if is_main_container:
+            self._main_depth += 1
+        elif self._main_depth > 0:
+            self._main_depth += 1
+
+    def handle_endtag(self, tag):
+        if tag in {"script", "style"} and self._skip_depth > 0:
+            self._skip_depth -= 1
+            return
+
+        if self._main_depth > 0:
+            self._main_depth -= 1
+
+    def handle_data(self, data):
+        if self._skip_depth > 0:
+            return
+        cleaned = self.CONTROL_CHARS.sub(" ", data)
+        cleaned = self.WHITESPACE.sub(" ", cleaned).strip()
+        if cleaned:
+            self.parts.append(cleaned)
+            if self._main_depth > 0:
+                self.main_parts.append(cleaned)
+
+    def text(self) -> str:
+        if self.main_parts:
+            return " ".join(self.main_parts)
+        return " ".join(self.parts)
 
 
 def process_html_file(file_path: str) -> dict[str, int]:
@@ -141,6 +194,92 @@ def safe_doc_path_or_404(doc_path: str) -> str:
     return normalized
 
 
+def extract_plain_text_from_html(file_path: str) -> str:
+    parser = PlainTextHTMLParser()
+    with open(file_path, "r", encoding="utf-8", errors="ignore") as source_file:
+        parser.feed(source_file.read())
+    parser.close()
+    return parser.text()
+
+
+def build_query_term_regex(query_terms: list[str]) -> re.Pattern | None:
+    unique_terms = sorted(set(query_terms), key=len, reverse=True)
+    if not unique_terms:
+        return None
+    return re.compile(
+        r"\b(" + "|".join(re.escape(term) for term in unique_terms) + r")\b",
+        re.IGNORECASE,
+    )
+
+
+def highlight_query_terms(text: str, query_terms: list[str]) -> str:
+    pattern = build_query_term_regex(query_terms)
+    if pattern is None:
+        return html.escape(text)
+
+    highlighted_parts = []
+    last_index = 0
+    for match in pattern.finditer(text):
+        highlighted_parts.append(html.escape(text[last_index:match.start()]))
+        highlighted_parts.append(f"<mark>{html.escape(match.group(0))}</mark>")
+        last_index = match.end()
+    highlighted_parts.append(html.escape(text[last_index:]))
+    return "".join(highlighted_parts)
+
+
+def build_result_snippet(
+    doc_path: str | None,
+    query_terms: list[str],
+    max_length: int = 220,
+) -> str | None:
+    if not doc_path:
+        return None
+
+    full_path = os.path.join(DEFAULT_DOCS_DIR, doc_path)
+    if not os.path.isfile(full_path):
+        return None
+
+    plain_text = extract_plain_text_from_html(full_path)
+    if not plain_text:
+        return None
+
+    match_pattern = build_query_term_regex(query_terms)
+    match_start = 0
+    if match_pattern is not None:
+        match = match_pattern.search(plain_text)
+        if match is not None:
+            match_start = match.start()
+
+    start = max(0, match_start - (max_length // 3))
+    end = min(len(plain_text), start + max_length)
+
+    if start > 0:
+        next_space = plain_text.find(" ", start)
+        if next_space != -1:
+            start = next_space + 1
+    if end < len(plain_text):
+        previous_space = plain_text.rfind(" ", start, end)
+        if previous_space > start:
+            end = previous_space
+
+    snippet = plain_text[start:end].strip()
+    if not snippet:
+        return None
+
+    prefix = "... " if start > 0 else ""
+    suffix = " ..." if end < len(plain_text) else ""
+    return f"{prefix}{highlight_query_terms(snippet, query_terms)}{suffix}"
+
+
+def attach_result_snippets(results: list[dict[str, object]], query_terms: list[str]) -> None:
+    for result in results:
+        doc_path = result.get("doc_path")
+        if not isinstance(doc_path, str):
+            result["snippet_html"] = None
+            continue
+        result["snippet_html"] = build_result_snippet(doc_path, query_terms)
+
+
 def tf_idf_search(
     query: str,
     counts_by_file: dict[str, dict[str, int]],
@@ -223,54 +362,6 @@ def tf_idf_search(
     return ranked_results[:limit]
 
 
-def build_query_insights(
-    query: str,
-    counts_by_file: dict[str, dict[str, int]],
-    matched_documents: int,
-) -> dict[str, object] | None:
-    query_terms = tokenize_words(query)
-    if not query_terms:
-        return None
-
-    unique_terms = list(dict.fromkeys(query_terms))
-    term_stats = []
-    found_terms = []
-    missing_terms = []
-
-    for term in unique_terms:
-        document_frequency = 0
-        total_occurrences = 0
-        for term_counts in counts_by_file.values():
-            count = term_counts.get(term, 0)
-            if count > 0:
-                document_frequency += 1
-                total_occurrences += count
-
-        if document_frequency > 0:
-            found_terms.append(term)
-        else:
-            missing_terms.append(term)
-
-        term_stats.append(
-            {
-                "term": term,
-                "document_frequency": document_frequency,
-                "total_occurrences": total_occurrences,
-            }
-        )
-
-    return {
-        "terms": unique_terms,
-        "found_terms": found_terms,
-        "missing_terms": missing_terms,
-        "term_stats": term_stats,
-        "query_word_count": len(query_terms),
-        "unique_query_word_count": len(unique_terms),
-        "matched_document_count": matched_documents,
-        "corpus_document_count": len(counts_by_file),
-    }
-
-
 app = Flask(__name__)
 
 
@@ -292,7 +383,6 @@ def view_document(doc_path: str):
 def hello_world():
     query = ""
     results = []
-    query_insights = None
     error = None
     if request.method == 'POST':
         query = request.form.get("query", "").strip()
@@ -302,16 +392,14 @@ def hello_world():
             try:
                 counts_by_file = load_index_data()
                 results = tf_idf_search(query, counts_by_file)
-                query_insights = build_query_insights(
-                    query, counts_by_file, matched_documents=len(results)
-                )
+                query_terms = tokenize_words(query)
+                attach_result_snippets(results, query_terms)
             except FileNotFoundError as exc:
                 error = str(exc)
     return render_template(
         "index.html",
         query=query,
         results=results,
-        query_insights=query_insights,
         error=error,
     )
     

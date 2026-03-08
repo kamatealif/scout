@@ -67,6 +67,14 @@
       li {
         margin-bottom: 7px;
       }
+      .snippet {
+        margin-top: 3px;
+        color: #222;
+      }
+      mark {
+        background: #ffff99;
+        color: #000;
+      }
       a {
         color: #0000ee;
         text-decoration: underline;
@@ -112,6 +120,9 @@
           <a href="{{ url_for('view_document', doc_path=result.doc_path) }}">{{ result.file }}</a>
           {% else %}
           {{ result.file }}
+          {% endif %}
+          {% if result.snippet_html %}
+          <div class="snippet">{{ result.snippet_html|safe }}</div>
           {% endif %}
         </li>
         {% endfor %}
