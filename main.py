@@ -3,6 +3,7 @@ from collections import Counter
 import json
 import os
 import re
+from flask import Flask
 
 
 class MyHTMLParser(HTMLParser):
@@ -42,6 +43,14 @@ def process_html_file(file_path: str) -> dict[str, int]:
     parser.close()
     return dict(parser.word_counts)
 
+app = Flask(__name__)
+
+
+@app.route("/")
+def hello_world():
+    return "<p>Hello, World!</p>"
+
+
 def index_file(file_path: str) -> dict[str, int]:
     counts_by_file = {}
     for dirpath, _, filenames in os.walk(file_path):
@@ -59,7 +68,10 @@ def index_file(file_path: str) -> dict[str, int]:
 
     print("Saved word counts to {}".format(output_file))
     
-    
+def serve(app):
+    debug_mode = os.getenv("FLASK_DEBUG", "0") == "1"
+    app.run(debug=debug_mode, use_reloader=debug_mode)
+
 def main():
     import sys
     if len(sys.argv) < 2:
@@ -68,21 +80,21 @@ def main():
         return
     
     subcommand = sys.argv[1].upper()
-    if subcommand == 'INDEX':
+    if subcommand == "INDEX":
         if len(sys.argv) < 3:
             print("Usage: python main.py INDEX [folder path]")
             return
         index_file(sys.argv[2])
-        
-    if subcommand == 'SERVE':
-        print("Serve subcommand is not implemented yet.")
-        # serve()
+        return
+    if subcommand == "SERVE":
+        serve(app)
+        return
+    usage()
 
 def usage():
     print("SUBCOMMANDS:")
     print("      INDEX:   [folder path]: Process HTML files and generate word counts")
-    print("    [SERVE]: Start a web server to serve the generated word counts (not implemented yet)")
+    print("      SERVE: Start the Flask web server")
 
 if __name__ == "__main__":
-    usage()
-    # main()
+    main()
