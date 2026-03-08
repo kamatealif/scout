@@ -212,6 +212,8 @@ def tf_idf_search(
                 "matches": ", ".join(matched_terms),
                 "term_hits": term_hits,
                 "coverage": coverage,
+                "matched_term_count": unique_matches,
+                "query_term_count": len(unique_query_terms),
             }
         )
 
@@ -219,6 +221,54 @@ def tf_idf_search(
         key=lambda result: (-result["score"], -result["term_hits"], result["file"])
     )
     return ranked_results[:limit]
+
+
+def build_query_insights(
+    query: str,
+    counts_by_file: dict[str, dict[str, int]],
+    matched_documents: int,
+) -> dict[str, object] | None:
+    query_terms = tokenize_words(query)
+    if not query_terms:
+        return None
+
+    unique_terms = list(dict.fromkeys(query_terms))
+    term_stats = []
+    found_terms = []
+    missing_terms = []
+
+    for term in unique_terms:
+        document_frequency = 0
+        total_occurrences = 0
+        for term_counts in counts_by_file.values():
+            count = term_counts.get(term, 0)
+            if count > 0:
+                document_frequency += 1
+                total_occurrences += count
+
+        if document_frequency > 0:
+            found_terms.append(term)
+        else:
+            missing_terms.append(term)
+
+        term_stats.append(
+            {
+                "term": term,
+                "document_frequency": document_frequency,
+                "total_occurrences": total_occurrences,
+            }
+        )
+
+    return {
+        "terms": unique_terms,
+        "found_terms": found_terms,
+        "missing_terms": missing_terms,
+        "term_stats": term_stats,
+        "query_word_count": len(query_terms),
+        "unique_query_word_count": len(unique_terms),
+        "matched_document_count": matched_documents,
+        "corpus_document_count": len(counts_by_file),
+    }
 
 
 app = Flask(__name__)
@@ -242,6 +292,7 @@ def view_document(doc_path: str):
 def hello_world():
     query = ""
     results = []
+    query_insights = None
     error = None
     if request.method == 'POST':
         query = request.form.get("query", "").strip()
@@ -251,9 +302,18 @@ def hello_world():
             try:
                 counts_by_file = load_index_data()
                 results = tf_idf_search(query, counts_by_file)
+                query_insights = build_query_insights(
+                    query, counts_by_file, matched_documents=len(results)
+                )
             except FileNotFoundError as exc:
                 error = str(exc)
-    return render_template("index.html", query=query, results=results, error=error)
+    return render_template(
+        "index.html",
+        query=query,
+        results=results,
+        query_insights=query_insights,
+        error=error,
+    )
     
 def serve(app):
     debug_mode = os.getenv("FLASK_DEBUG", "0") == "1"

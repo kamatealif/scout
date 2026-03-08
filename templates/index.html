@@ -3,92 +3,78 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TF-IDF Search</title>
+    <title>Documentation Search</title>
     <style>
-      * {
-        box-sizing: border-box;
-      }
       body {
-        font-family: Arial, sans-serif;
+        font-family: "Times New Roman", Times, serif;
+        font-size: 16px;
         margin: 0;
-        min-height: 100vh;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        padding: 24px 16px;
-        background: #f3f4f6;
-      }
-      .page {
-        width: min(960px, 100%);
+        color: #000;
+        background: #fff;
       }
       .panel {
-        background: #ffffff;
-        border: 1px solid #e5e7eb;
-        border-radius: 14px;
-        padding: 24px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+        width: min(760px, 96%);
+        margin: 24px auto;
+        border: 1px solid #000;
+        padding: 14px;
+        background: #fff;
       }
       h1 {
-        margin: 0 0 18px;
+        margin: 0 0 12px;
         text-align: center;
+        font-size: 28px;
+        font-weight: bold;
       }
       form {
-        margin-bottom: 16px;
+        margin-bottom: 14px;
         display: flex;
-        gap: 10px;
+        gap: 8px;
         align-items: center;
       }
       input[type="text"] {
         flex: 1;
         min-width: 0;
-        padding: 10px 12px;
-        border: 1px solid #d1d5db;
-        border-radius: 8px;
-        font-size: 16px;
+        padding: 5px 6px;
+        border: 1px solid #000;
+        border-radius: 0;
+        font-family: inherit;
+        font-size: inherit;
       }
       button {
-        padding: 10px 14px;
-        border: 1px solid #111827;
-        border-radius: 8px;
-        background: #111827;
-        color: #ffffff;
+        padding: 5px 10px;
+        border: 1px solid #000;
+        border-radius: 0;
+        background: #efefef;
+        color: #000;
+        font-family: inherit;
+        font-size: inherit;
         cursor: pointer;
       }
+      button:hover {
+        background: #e2e2e2;
+      }
       .error {
-        color: #b91c1c;
-        margin-bottom: 12px;
+        color: #a00000;
+        margin-bottom: 10px;
       }
       .muted {
-        color: #666;
+        color: #333;
       }
       ul {
-        list-style: none;
-        margin: 0;
-        padding: 0;
+        margin: 8px 0 0;
+        padding-left: 22px;
       }
       li {
-        margin-bottom: 12px;
-        border: 1px solid #e5e7eb;
-        border-radius: 10px;
-        padding: 12px;
-        background: #fafafa;
-      }
-      code {
-        background: #f4f4f4;
-        padding: 2px 4px;
-        border-radius: 4px;
-        word-break: break-word;
+        margin-bottom: 7px;
       }
       a {
-        color: #1d4ed8;
+        color: #0000ee;
+        text-decoration: underline;
       }
       @media (max-width: 640px) {
-        body {
-          align-items: flex-start;
-          padding: 14px;
-        }
         .panel {
-          padding: 16px;
+          margin: 10px auto;
+          padding: 10px;
         }
         form {
           flex-direction: column;
@@ -101,51 +87,38 @@
     </style>
   </head>
   <body>
-    <main class="page">
-      <section class="panel">
-        <h1>TF-IDF Document Search</h1>
+    <section class="panel">
+      <h1>Documentation Search</h1>
 
-        <form method="POST">
-          <input
-            type="text"
-            name="query"
-            id="query"
-            placeholder="Enter words to search"
-            value="{{ query }}"
-          />
-          <button type="submit">Search</button>
-        </form>
+      <form method="POST">
+        <input
+          type="text"
+          name="query"
+          id="query"
+          placeholder="Enter search words"
+          value="{{ query }}"
+        />
+        <button type="submit">Search</button>
+      </form>
 
-        {% if error %}
-        <p class="error">{{ error }}</p>
-        {% endif %} {% if query and results %}
-        <p class="muted">
-          Results for <strong>{{ query }}</strong> ({{ results|length }} shown)
-        </p>
-        <ul>
-          {% for result in results %}
-          <li>
-            <div>
-              {% if result.doc_path %}
-              <a href="{{ url_for('view_document', doc_path=result.doc_path) }}"
-                ><code>{{ result.file }}</code></a
-              >
-              {% else %}
-              <code>{{ result.file }}</code>
-              {% endif %}
-            </div>
-            <div>Score: {{ "%.4f"|format(result.score) }}</div>
-            <div class="muted">Total term hits: {{ result.term_hits }}</div>
-            <div class="muted">Matched terms: {{ result.matches }}</div>
-          </li>
-          {% endfor %}
-        </ul>
-        {% elif query and not error %}
-        <p class="muted">
-          No matching documents found for <strong>{{ query }}</strong>.
-        </p>
-        {% endif %}
-      </section>
-    </main>
+      {% if error %}
+      <p class="error">{{ error }}</p>
+      {% endif %} {% if query and results %}
+      <p class="muted">Relevant links for "<strong>{{ query }}</strong>":</p>
+      <ul>
+        {% for result in results %}
+        <li>
+          {% if result.doc_path %}
+          <a href="{{ url_for('view_document', doc_path=result.doc_path) }}">{{ result.file }}</a>
+          {% else %}
+          {{ result.file }}
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% elif query and not error %}
+      <p class="muted">No relevant links found for "<strong>{{ query }}</strong>".</p>
+      {% endif %}
+    </section>
   </body>
 </html>
