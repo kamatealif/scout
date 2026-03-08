@@ -28,6 +28,7 @@
       form {
         margin-bottom: 14px;
         display: flex;
+        flex-wrap: wrap;
         gap: 8px;
         align-items: center;
       }
@@ -52,6 +53,13 @@
       }
       button:hover {
         background: #e2e2e2;
+      }
+      .option {
+        width: 100%;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 15px;
       }
       .error {
         color: #a00000;
@@ -107,6 +115,18 @@
           value="{{ query }}"
         />
         <button type="submit">Search</button>
+        <label class="option" for="stemming">
+          <input
+            type="checkbox"
+            id="stemming"
+            name="stemming"
+            value="1"
+            {% if use_stemming %}
+            checked
+            {% endif %}
+          />
+          Use stemming (optional)
+        </label>
       </form>
 
       {% if error %}

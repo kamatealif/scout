@@ -12,6 +12,40 @@ LEGACY_INDEX_FILE = "index.json"
 DEFAULT_DOCS_DIR = "docs"
 WORD_REGEX = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 INDEX_CACHE = None
+NORMALIZED_INDEX_CACHE = {False: None, True: None}
+DOC_TEXT_CACHE: dict[str, str] = {}
+STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "but",
+    "by",
+    "for",
+    "from",
+    "has",
+    "have",
+    "he",
+    "in",
+    "is",
+    "it",
+    "its",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "their",
+    "this",
+    "to",
+    "was",
+    "were",
+    "will",
+    "with",
+}
 
 
 class MyHTMLParser(HTMLParser):
@@ -108,7 +142,54 @@ def tokenize_words(text: str) -> list[str]:
     return [match.group().lower() for match in WORD_REGEX.finditer(text)]
 
 
+def simple_stem(token: str) -> str:
+    if len(token) <= 3:
+        return token
+
+    if token.endswith("ies") and len(token) > 4:
+        return token[:-3] + "y"
+    if token.endswith("sses"):
+        return token[:-2]
+    if token.endswith("xes") and len(token) > 4:
+        return token[:-2]
+    if token.endswith("ed") and len(token) > 4:
+        candidate = token[:-2]
+        return candidate if len(candidate) >= 3 else token
+    if token.endswith("ing") and len(token) > 5:
+        candidate = token[:-3]
+        if len(candidate) >= 3:
+            if len(candidate) > 3 and candidate[-1] == candidate[-2]:
+                candidate = candidate[:-1]
+            return candidate
+    if token.endswith("ly") and len(token) > 4:
+        return token[:-2]
+    if token.endswith("ment") and len(token) > 6:
+        return token[:-4]
+    if token.endswith("es") and len(token) > 4:
+        return token[:-2]
+    if token.endswith("s") and len(token) > 3 and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+
+def normalize_token(token: str, use_stemming: bool) -> str:
+    normalized = token.lower()
+    if use_stemming:
+        normalized = simple_stem(normalized)
+    return normalized
+
+
+def prepare_query_terms(
+    query: str, use_stemming: bool
+) -> tuple[list[str], list[str], list[str]]:
+    raw_terms = tokenize_words(query)
+    filtered_terms = [term for term in raw_terms if term not in STOPWORDS]
+    normalized_terms = [normalize_token(term, use_stemming) for term in filtered_terms]
+    return raw_terms, filtered_terms, normalized_terms
+
+
 def index_file(file_path: str, output_file: str = INDEX_FILE) -> dict[str, dict[str, int]]:
+    global INDEX_CACHE, NORMALIZED_INDEX_CACHE, DOC_TEXT_CACHE
     counts_by_file: dict[str, dict[str, int]] = {}
     for dirpath, _, filenames in os.walk(file_path):
         for filename in filenames:
@@ -123,6 +204,9 @@ def index_file(file_path: str, output_file: str = INDEX_FILE) -> dict[str, dict[
         json.dump(counts_by_file, json_file, indent=2, sort_keys=True)
 
     print("Saved word counts to {}".format(output_file))
+    INDEX_CACHE = counts_by_file
+    NORMALIZED_INDEX_CACHE = {False: None, True: None}
+    DOC_TEXT_CACHE = {}
     return counts_by_file
 
 
@@ -144,6 +228,27 @@ def load_index_data() -> dict[str, dict[str, int]]:
     raise FileNotFoundError(
         "No search index found. Run: python main.py INDEX <folder path>."
     )
+
+
+def normalized_index_data(
+    counts_by_file: dict[str, dict[str, int]], use_stemming: bool
+) -> dict[str, dict[str, int]]:
+    if not use_stemming:
+        return counts_by_file
+
+    cached = NORMALIZED_INDEX_CACHE[True]
+    if cached is not None:
+        return cached
+
+    normalized_counts_by_file: dict[str, dict[str, int]] = {}
+    for file_key, term_counts in counts_by_file.items():
+        aggregated = Counter()
+        for term, count in term_counts.items():
+            aggregated[normalize_token(term, use_stemming=True)] += count
+        normalized_counts_by_file[file_key] = dict(aggregated)
+
+    NORMALIZED_INDEX_CACHE[True] = normalized_counts_by_file
+    return normalized_counts_by_file
 
 
 def docs_relative_path(file_key: str) -> str | None:
@@ -202,6 +307,21 @@ def extract_plain_text_from_html(file_path: str) -> str:
     return parser.text()
 
 
+def get_document_text(doc_path: str) -> str:
+    cached_text = DOC_TEXT_CACHE.get(doc_path)
+    if cached_text is not None:
+        return cached_text
+
+    full_path = os.path.join(DEFAULT_DOCS_DIR, doc_path)
+    if not os.path.isfile(full_path):
+        DOC_TEXT_CACHE[doc_path] = ""
+        return ""
+
+    extracted = extract_plain_text_from_html(full_path)
+    DOC_TEXT_CACHE[doc_path] = extracted
+    return extracted
+
+
 def build_query_term_regex(query_terms: list[str]) -> re.Pattern | None:
     unique_terms = sorted(set(query_terms), key=len, reverse=True)
     if not unique_terms:
@@ -235,11 +355,7 @@ def build_result_snippet(
     if not doc_path:
         return None
 
-    full_path = os.path.join(DEFAULT_DOCS_DIR, doc_path)
-    if not os.path.isfile(full_path):
-        return None
-
-    plain_text = extract_plain_text_from_html(full_path)
+    plain_text = get_document_text(doc_path)
     if not plain_text:
         return None
 
@@ -284,34 +400,47 @@ def tf_idf_search(
     query: str,
     counts_by_file: dict[str, dict[str, int]],
     limit: int = 20,
+    use_stemming: bool = False,
+    query_terms: list[str] | None = None,
 ) -> list[dict[str, object]]:
-    query_terms = tokenize_words(query)
+    if query_terms is None:
+        _, _, query_terms = prepare_query_terms(query, use_stemming=use_stemming)
     if not query_terms:
         return []
 
+    search_counts_by_file = normalized_index_data(
+        counts_by_file, use_stemming=use_stemming
+    )
     document_count = len(counts_by_file)
     if document_count == 0:
         return []
 
     query_term_counts = Counter(query_terms)
     unique_query_terms = list(query_term_counts)
+    query_phrase_terms = tokenize_words(query)
+    phrase_regex = None
+    if len(query_phrase_terms) >= 2:
+        phrase_regex = re.compile(
+            r"\b" + r"\s+".join(re.escape(term) for term in query_phrase_terms) + r"\b",
+            re.IGNORECASE,
+        )
 
     doc_frequency: dict[str, int] = {}
     for term in unique_query_terms:
         doc_frequency[term] = sum(
-            1 for term_counts in counts_by_file.values() if term in term_counts
+            1 for term_counts in search_counts_by_file.values() if term in term_counts
         )
 
     doc_lengths = {
         file_key: sum(term_counts.values())
-        for file_key, term_counts in counts_by_file.items()
+        for file_key, term_counts in search_counts_by_file.items()
     }
     avg_doc_length = sum(doc_lengths.values()) / document_count
 
     ranked_results = []
     k1 = 1.5
     b = 0.75
-    for file_key, term_counts in counts_by_file.items():
+    for file_key, term_counts in search_counts_by_file.items():
         tf_idf_score = 0.0
         term_hits = 0
         unique_matches = 0
@@ -343,6 +472,14 @@ def tf_idf_search(
         frequency_boost = 1.0 + 0.15 * math.log1p(term_hits)
         score = tf_idf_score * frequency_boost * (1.0 + 0.35 * coverage)
         doc_path = docs_relative_path(file_key)
+        phrase_hits = 0
+        if phrase_regex is not None and doc_path is not None:
+            plain_text = get_document_text(doc_path)
+            if plain_text:
+                phrase_hits = len(phrase_regex.findall(plain_text))
+                if phrase_hits > 0:
+                    score *= 1.0 + min(0.5, 0.2 * phrase_hits)
+
         ranked_results.append(
             {
                 "file": file_key,
@@ -353,6 +490,7 @@ def tf_idf_search(
                 "coverage": coverage,
                 "matched_term_count": unique_matches,
                 "query_term_count": len(unique_query_terms),
+                "phrase_hits": phrase_hits,
             }
         )
 
@@ -384,22 +522,36 @@ def hello_world():
     query = ""
     results = []
     error = None
+    use_stemming = False
     if request.method == 'POST':
         query = request.form.get("query", "").strip()
+        use_stemming = request.form.get("stemming") == "1"
         if not query:
             error = "Enter a query to search."
         else:
             try:
                 counts_by_file = load_index_data()
-                results = tf_idf_search(query, counts_by_file)
-                query_terms = tokenize_words(query)
-                attach_result_snippets(results, query_terms)
+                _, snippet_terms, normalized_query_terms = prepare_query_terms(
+                    query, use_stemming=use_stemming
+                )
+                if not normalized_query_terms:
+                    error = "Query contains only stopwords. Try more specific words."
+                    results = []
+                else:
+                    results = tf_idf_search(
+                        query,
+                        counts_by_file,
+                        use_stemming=use_stemming,
+                        query_terms=normalized_query_terms,
+                    )
+                    attach_result_snippets(results, snippet_terms)
             except FileNotFoundError as exc:
                 error = str(exc)
     return render_template(
         "index.html",
         query=query,
         results=results,
+        use_stemming=use_stemming,
         error=error,
     )
     
