@@ -106,6 +106,12 @@ Start server:
 python main.py SERVE
 ```
 
+Run tests:
+
+```bash
+python -m unittest discover -s tests
+```
+
 Enable Flask debug mode:
 
 ```bash
