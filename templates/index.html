@@ -41,6 +41,15 @@
         font-family: inherit;
         font-size: inherit;
       }
+      select {
+        padding: 5px 6px;
+        border: 1px solid #000;
+        border-radius: 0;
+        background: #fff;
+        color: #000;
+        font-family: inherit;
+        font-size: inherit;
+      }
       button {
         padding: 5px 10px;
         border: 1px solid #000;
@@ -114,6 +123,18 @@
           placeholder="Enter search words"
           value="{{ query }}"
         />
+        <select name="section" id="section">
+          {% for option in section_options %}
+          <option
+            value="{{ option.value }}"
+            {% if option.value == selected_section %}
+            selected
+            {% endif %}
+          >
+            {{ option.label }}
+          </option>
+          {% endfor %}
+        </select>
         <button type="submit">Search</button>
         <label class="option" for="stemming">
           <input
@@ -132,7 +153,10 @@
       {% if error %}
       <p class="error">{{ error }}</p>
       {% endif %} {% if query and results %}
-      <p class="muted">Relevant links for "<strong>{{ query }}</strong>":</p>
+      <p class="muted">
+        Relevant links for "<strong>{{ query }}</strong>" in
+        "<strong>{{ selected_section_label }}</strong>":
+      </p>
       <ul>
         {% for result in results %}
         <li>
@@ -148,7 +172,10 @@
         {% endfor %}
       </ul>
       {% elif query and not error %}
-      <p class="muted">No relevant links found for "<strong>{{ query }}</strong>".</p>
+      <p class="muted">
+        No relevant links found for "<strong>{{ query }}</strong>" in
+        "<strong>{{ selected_section_label }}</strong>".
+      </p>
       {% endif %}
     </section>
   </body>

@@ -12,7 +12,7 @@ LEGACY_INDEX_FILE = "index.json"
 DEFAULT_DOCS_DIR = "docs"
 WORD_REGEX = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 INDEX_CACHE = None
-NORMALIZED_INDEX_CACHE = {False: None, True: None}
+NORMALIZED_INDEX_CACHE: dict[tuple[int, bool], dict[str, dict[str, int]]] = {}
 DOC_TEXT_CACHE: dict[str, str] = {}
 STOPWORDS = {
     "a",
@@ -205,7 +205,7 @@ def index_file(file_path: str, output_file: str = INDEX_FILE) -> dict[str, dict[
 
     print("Saved word counts to {}".format(output_file))
     INDEX_CACHE = counts_by_file
-    NORMALIZED_INDEX_CACHE = {False: None, True: None}
+    NORMALIZED_INDEX_CACHE = {}
     DOC_TEXT_CACHE = {}
     return counts_by_file
 
@@ -236,7 +236,8 @@ def normalized_index_data(
     if not use_stemming:
         return counts_by_file
 
-    cached = NORMALIZED_INDEX_CACHE[True]
+    cache_key = (id(counts_by_file), use_stemming)
+    cached = NORMALIZED_INDEX_CACHE.get(cache_key)
     if cached is not None:
         return cached
 
@@ -247,8 +248,51 @@ def normalized_index_data(
             aggregated[normalize_token(term, use_stemming=True)] += count
         normalized_counts_by_file[file_key] = dict(aggregated)
 
-    NORMALIZED_INDEX_CACHE[True] = normalized_counts_by_file
+    NORMALIZED_INDEX_CACHE[cache_key] = normalized_counts_by_file
     return normalized_counts_by_file
+
+
+def section_options_for_index(
+    counts_by_file: dict[str, dict[str, int]]
+) -> list[dict[str, str]]:
+    prefixes = set()
+    has_root_docs = False
+
+    for file_key in counts_by_file:
+        doc_path = docs_relative_path(file_key)
+        if not doc_path:
+            continue
+        if "/" in doc_path:
+            prefixes.add(doc_path.split("/", 1)[0] + "/")
+        else:
+            has_root_docs = True
+
+    options = [{"value": "", "label": "All docs"}]
+    if has_root_docs:
+        options.append({"value": "__root__", "label": "docs/*.html"})
+    for prefix in sorted(prefixes):
+        options.append({"value": prefix, "label": f"docs/{prefix}*"})
+    return options
+
+
+def filter_index_by_section(
+    counts_by_file: dict[str, dict[str, int]], selected_section: str
+) -> dict[str, dict[str, int]]:
+    if not selected_section:
+        return counts_by_file
+
+    filtered_counts: dict[str, dict[str, int]] = {}
+    for file_key, term_counts in counts_by_file.items():
+        doc_path = docs_relative_path(file_key)
+        if not doc_path:
+            continue
+        if selected_section == "__root__":
+            if "/" not in doc_path:
+                filtered_counts[file_key] = term_counts
+            continue
+        if doc_path.startswith(selected_section):
+            filtered_counts[file_key] = term_counts
+    return filtered_counts
 
 
 def docs_relative_path(file_key: str) -> str | None:
@@ -523,14 +567,37 @@ def hello_world():
     results = []
     error = None
     use_stemming = False
+    selected_section = ""
+    selected_section_label = "All docs"
+    section_options = [{"value": "", "label": "All docs"}]
+    counts_by_file = None
+
+    try:
+        counts_by_file = load_index_data()
+        section_options = section_options_for_index(counts_by_file)
+    except FileNotFoundError as exc:
+        if request.method == "POST":
+            error = str(exc)
+
     if request.method == 'POST':
         query = request.form.get("query", "").strip()
         use_stemming = request.form.get("stemming") == "1"
+        selected_section = request.form.get("section", "")
+        section_labels = {
+            option["value"]: option["label"]
+            for option in section_options
+        }
+        if selected_section not in section_labels:
+            selected_section = ""
+        selected_section_label = section_labels.get(selected_section, "All docs")
+
         if not query:
             error = "Enter a query to search."
-        else:
+        elif counts_by_file is not None:
             try:
-                counts_by_file = load_index_data()
+                filtered_counts_by_file = filter_index_by_section(
+                    counts_by_file, selected_section
+                )
                 _, snippet_terms, normalized_query_terms = prepare_query_terms(
                     query, use_stemming=use_stemming
                 )
@@ -540,18 +607,22 @@ def hello_world():
                 else:
                     results = tf_idf_search(
                         query,
-                        counts_by_file,
+                        filtered_counts_by_file,
                         use_stemming=use_stemming,
                         query_terms=normalized_query_terms,
                     )
                     attach_result_snippets(results, snippet_terms)
             except FileNotFoundError as exc:
                 error = str(exc)
+
     return render_template(
         "index.html",
         query=query,
         results=results,
         use_stemming=use_stemming,
+        section_options=section_options,
+        selected_section=selected_section,
+        selected_section_label=selected_section_label,
         error=error,
     )
     
