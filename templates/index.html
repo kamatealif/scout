@@ -49,17 +49,24 @@
       }
       .search-card {
         margin-bottom: 16px;
-        padding: 16px;
+        padding: 18px;
       }
       .search-form {
         display: grid;
-        grid-template-columns: minmax(0, 1.5fr) minmax(180px, 0.8fr) auto;
-        gap: 12px;
-        align-items: end;
+        gap: 14px;
       }
       .field {
         display: grid;
         gap: 6px;
+      }
+      .search-primary {
+        min-width: 0;
+      }
+      .search-secondary {
+        display: grid;
+        grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+        gap: 12px;
+        align-items: end;
       }
       .field-label {
         font-size: 0.76rem;
@@ -71,7 +78,7 @@
       input[type="text"],
       select {
         width: 100%;
-        min-height: 42px;
+        min-height: 44px;
         padding: 0 13px;
         border: 1px solid var(--input);
         border-radius: 10px;
@@ -92,12 +99,16 @@
         box-shadow: 0 0 0 4px var(--ring);
       }
       .actions {
-        display: grid;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
         gap: 10px;
-        align-content: end;
+        min-height: 44px;
+        padding: 0 2px;
       }
       button {
-        min-height: 42px;
+        min-height: 44px;
         padding: 0 16px;
         border: 1px solid var(--primary);
         border-radius: 10px;
@@ -106,6 +117,7 @@
         font: inherit;
         font-weight: 600;
         cursor: pointer;
+        white-space: nowrap;
       }
       button:hover {
         background: #27272a;
@@ -185,11 +197,11 @@
         color: var(--foreground);
       }
       @media (max-width: 720px) {
-        .search-form {
+        .search-secondary {
           grid-template-columns: 1fr;
         }
         .actions {
-          grid-template-columns: 1fr;
+          align-items: stretch;
         }
         button {
           width: 100%;
@@ -203,7 +215,7 @@
 
       <div class="card search-card">
         <form method="POST" class="search-form">
-          <label class="field" for="query">
+          <label class="field search-primary" for="query">
             <span class="field-label">Search Terms</span>
             <input
               type="text"
@@ -213,35 +225,37 @@
               value="{{ query }}"
             />
           </label>
-          <label class="field" for="section">
-            <span class="field-label">Section</span>
-            <select name="section" id="section">
-              {% for option in section_options %}
-              <option
-                value="{{ option.value }}"
-                {% if option.value == selected_section %}
-                selected
-                {% endif %}
-              >
-                {{ option.label }}
-              </option>
-              {% endfor %}
-            </select>
-          </label>
-          <div class="actions">
-            <button type="submit">Search</button>
-            <label class="option" for="stemming">
-              <input
-                type="checkbox"
-                id="stemming"
-                name="stemming"
-                value="1"
-                {% if use_stemming %}
-                checked
-                {% endif %}
-              />
-              Use stemming
+          <div class="search-secondary">
+            <label class="field" for="section">
+              <span class="field-label">Section</span>
+              <select name="section" id="section">
+                {% for option in section_options %}
+                <option
+                  value="{{ option.value }}"
+                  {% if option.value == selected_section %}
+                  selected
+                  {% endif %}
+                >
+                  {{ option.label }}
+                </option>
+                {% endfor %}
+              </select>
             </label>
+            <div class="actions">
+              <label class="option" for="stemming">
+                <input
+                  type="checkbox"
+                  id="stemming"
+                  name="stemming"
+                  value="1"
+                  {% if use_stemming %}
+                  checked
+                  {% endif %}
+                />
+                Use stemming
+              </label>
+              <button type="submit">Search</button>
+            </div>
           </div>
         </form>
       </div>
