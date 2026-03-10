@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import tempfile
@@ -45,12 +46,17 @@ class ScoutAppTests(unittest.TestCase):
 
         self.original_docs_dir = indexer.DEFAULT_DOCS_DIR
         self.original_index_cache = indexer.INDEX_CACHE
+        self.original_click_count_file = indexer.CLICK_COUNT_FILE
+        self.original_click_count_cache = indexer.CLICK_COUNT_CACHE
         self.original_normalized_index_cache = search.NORMALIZED_INDEX_CACHE
         self.original_doc_text_cache = indexer.DOC_TEXT_CACHE
         self.original_testing = scout_app.app.config.get("TESTING", False)
+        self.click_count_file = os.path.join(self.tempdir.name, "click_counts.json")
 
         indexer.DEFAULT_DOCS_DIR = self.docs_dir
+        indexer.CLICK_COUNT_FILE = self.click_count_file
         indexer.INDEX_CACHE = self._build_index()
+        indexer.CLICK_COUNT_CACHE = None
         search.NORMALIZED_INDEX_CACHE = {}
         indexer.DOC_TEXT_CACHE = {}
         scout_app.app.config["TESTING"] = True
@@ -59,6 +65,8 @@ class ScoutAppTests(unittest.TestCase):
     def tearDown(self):
         indexer.DEFAULT_DOCS_DIR = self.original_docs_dir
         indexer.INDEX_CACHE = self.original_index_cache
+        indexer.CLICK_COUNT_FILE = self.original_click_count_file
+        indexer.CLICK_COUNT_CACHE = self.original_click_count_cache
         search.NORMALIZED_INDEX_CACHE = self.original_normalized_index_cache
         indexer.DOC_TEXT_CACHE = self.original_doc_text_cache
         scout_app.app.config["TESTING"] = self.original_testing
@@ -128,6 +136,30 @@ class ScoutAppTests(unittest.TestCase):
         self.assertGreater(len(results), 0)
         self.assertEqual(results[0]["doc_path"], "library/tasks.html")
 
+    def test_tf_idf_search_uses_click_counts_to_reorder_results(self):
+        _, _, normalized_terms = search.prepare_query_terms(
+            "event loop", use_stemming=False
+        )
+
+        without_clicks = search.tf_idf_search(
+            "event loop",
+            indexer.INDEX_CACHE,
+            use_stemming=False,
+            query_terms=normalized_terms,
+            click_counts={},
+        )
+        with_clicks = search.tf_idf_search(
+            "event loop",
+            indexer.INDEX_CACHE,
+            use_stemming=False,
+            query_terms=normalized_terms,
+            click_counts={"tutorial/terms.html": 100},
+        )
+
+        self.assertEqual(without_clicks[0]["doc_path"], "library/asyncio.html")
+        self.assertEqual(with_clicks[0]["doc_path"], "tutorial/terms.html")
+        self.assertEqual(with_clicks[0]["click_count"], 100)
+
     def test_index_route_renders_search_page(self):
         response = self.client.get("/")
         try:
@@ -146,14 +178,32 @@ class ScoutAppTests(unittest.TestCase):
         )
         try:
             html = response.get_data(as_text=True)
-            doc_hrefs = re.findall(r'href="(/docs/[^"]+)"', html)
+            doc_hrefs = re.findall(r'href="(/result/[^"]+)"', html)
 
             self.assertEqual(response.status_code, 200)
-            self.assertIn("/docs/library/asyncio.html", doc_hrefs)
-            self.assertTrue(all(href.startswith("/docs/library/") for href in doc_hrefs))
+            self.assertIn("/result/library/asyncio.html", doc_hrefs)
+            self.assertTrue(all(href.startswith("/result/library/") for href in doc_hrefs))
             self.assertIn('class="snippet"', html)
         finally:
             response.close()
+
+    def test_result_route_tracks_clicks_and_redirects_to_document(self):
+        first_response = self.client.get("/result/library/asyncio.html")
+        second_response = self.client.get("/result/library/asyncio.html")
+        try:
+            self.assertEqual(first_response.status_code, 302)
+            self.assertEqual(second_response.status_code, 302)
+            self.assertTrue(
+                first_response.headers["Location"].endswith("/docs/library/asyncio.html")
+            )
+            self.assertEqual(indexer.get_click_count("library/asyncio.html"), 2)
+
+            with open(self.click_count_file, "r", encoding="utf-8") as handle:
+                stored_click_counts = json.load(handle)
+            self.assertEqual(stored_click_counts, {"library/asyncio.html": 2})
+        finally:
+            first_response.close()
+            second_response.close()
 
     def test_docs_route_serves_document(self):
         response = self.client.get("/docs/library/asyncio.html")

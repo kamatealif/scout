@@ -189,7 +189,7 @@
         {% for result in results %}
         <li>
           {% if result.doc_path %}
-          <a href="{{ url_for('view_document', doc_path=result.doc_path) }}">{{ result.file }}</a>
+          <a href="{{ url_for('open_result', doc_path=result.doc_path) }}">{{ result.file }}</a>
           {% else %}
           {{ result.file }}
           {% endif %}

@@ -1,6 +1,14 @@
 import os
 
-from flask import Flask, abort, render_template, request, send_from_directory
+from flask import (
+    Flask,
+    abort,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    url_for,
+)
 
 import indexer
 import search
@@ -26,6 +34,17 @@ def view_document(doc_path: str):
     except FileNotFoundError:
         abort(404)
     return send_from_directory(docs_root, safe_doc_path)
+
+
+@app.route("/result/<path:doc_path>")
+def open_result(doc_path: str):
+    try:
+        safe_doc_path = indexer.resolve_doc_path(doc_path)
+    except FileNotFoundError:
+        abort(404)
+
+    indexer.increment_click_count(safe_doc_path)
+    return redirect(url_for("view_document", doc_path=safe_doc_path))
 
 
 @app.route("/", methods=["GET", "POST"])

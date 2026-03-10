@@ -6,9 +6,11 @@ import re
 
 INDEX_FILE = "word_counts.json"
 LEGACY_INDEX_FILE = "index.json"
+CLICK_COUNT_FILE = "click_counts.json"
 DEFAULT_DOCS_DIR = "docs"
 WORD_REGEX = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 INDEX_CACHE: dict[str, dict[str, int]] | None = None
+CLICK_COUNT_CACHE: dict[str, int] | None = None
 DOC_TEXT_CACHE: dict[str, str] = {}
 
 
@@ -148,6 +150,52 @@ def load_index_data() -> dict[str, dict[str, int]]:
     raise FileNotFoundError(
         "No search index found. Run: python main.py INDEX <folder path>."
     )
+
+
+def load_click_counts() -> dict[str, int]:
+    global CLICK_COUNT_CACHE
+    if CLICK_COUNT_CACHE is not None:
+        return CLICK_COUNT_CACHE
+
+    if not os.path.exists(CLICK_COUNT_FILE):
+        CLICK_COUNT_CACHE = {}
+        return CLICK_COUNT_CACHE
+
+    with open(CLICK_COUNT_FILE, "r", encoding="utf-8") as source_file:
+        raw_click_counts = json.load(source_file)
+
+    CLICK_COUNT_CACHE = {
+        str(doc_path): max(0, int(count))
+        for doc_path, count in raw_click_counts.items()
+    }
+    return CLICK_COUNT_CACHE
+
+
+def save_click_counts(click_counts: dict[str, int]) -> dict[str, int]:
+    global CLICK_COUNT_CACHE
+    normalized_counts: dict[str, int] = {}
+    for doc_path, count in click_counts.items():
+        normalized_count = max(0, int(count))
+        if normalized_count > 0:
+            normalized_counts[str(doc_path)] = normalized_count
+
+    with open(CLICK_COUNT_FILE, "w", encoding="utf-8") as json_file:
+        json.dump(normalized_counts, json_file, indent=2, sort_keys=True)
+
+    CLICK_COUNT_CACHE = normalized_counts
+    return CLICK_COUNT_CACHE
+
+
+def get_click_count(doc_path: str) -> int:
+    return load_click_counts().get(doc_path, 0)
+
+
+def increment_click_count(doc_path: str) -> int:
+    click_counts = load_click_counts()
+    updated_count = click_counts.get(doc_path, 0) + 1
+    click_counts[doc_path] = updated_count
+    save_click_counts(click_counts)
+    return updated_count
 
 
 def docs_relative_path(file_key: str) -> str | None:

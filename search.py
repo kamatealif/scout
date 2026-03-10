@@ -225,12 +225,19 @@ def attach_result_snippets(results: list[dict[str, object]], query_terms: list[s
         result["snippet_html"] = build_result_snippet(doc_path, query_terms)
 
 
+def click_score_boost(click_count: int) -> float:
+    if click_count <= 0:
+        return 1.0
+    return 1.0 + 0.35 * math.log1p(click_count)
+
+
 def tf_idf_search(
     query: str,
     counts_by_file: dict[str, dict[str, int]],
     limit: int = 20,
     use_stemming: bool = False,
     query_terms: list[str] | None = None,
+    click_counts: dict[str, int] | None = None,
 ) -> list[dict[str, object]]:
     if query_terms is None:
         _, _, query_terms = prepare_query_terms(query, use_stemming=use_stemming)
@@ -243,6 +250,8 @@ def tf_idf_search(
     document_count = len(counts_by_file)
     if document_count == 0:
         return []
+    if click_counts is None:
+        click_counts = indexer.load_click_counts()
 
     query_term_counts = Counter(query_terms)
     unique_query_terms = list(query_term_counts)
@@ -301,6 +310,7 @@ def tf_idf_search(
         frequency_boost = 1.0 + 0.15 * math.log1p(term_hits)
         score = tf_idf_score * frequency_boost * (1.0 + 0.35 * coverage)
         doc_path = indexer.docs_relative_path(file_key)
+        click_count = click_counts.get(doc_path, 0) if doc_path else 0
         phrase_hits = 0
         if phrase_regex is not None and doc_path is not None:
             plain_text = indexer.get_document_text(doc_path)
@@ -308,12 +318,14 @@ def tf_idf_search(
                 phrase_hits = len(phrase_regex.findall(plain_text))
                 if phrase_hits > 0:
                     score *= 1.0 + min(0.5, 0.2 * phrase_hits)
+        score *= click_score_boost(click_count)
 
         ranked_results.append(
             {
                 "file": file_key,
                 "doc_path": doc_path,
                 "score": score,
+                "click_count": click_count,
                 "matches": ", ".join(matched_terms),
                 "term_hits": term_hits,
                 "coverage": coverage,
@@ -324,6 +336,11 @@ def tf_idf_search(
         )
 
     ranked_results.sort(
-        key=lambda result: (-result["score"], -result["term_hits"], result["file"])
+        key=lambda result: (
+            -result["score"],
+            -result["click_count"],
+            -result["term_hits"],
+            result["file"],
+        )
     )
     return ranked_results[:limit]

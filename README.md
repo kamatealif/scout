@@ -8,6 +8,7 @@ It indexes HTML files (for example, the `docs/` folder), then lets you search an
 
 - HTML document indexing into `word_counts.json`
 - Query-based document ranking (TF-IDF/BM25-style scoring)
+- Click-aware ranking persisted in `click_counts.json`
 - Clickable search results that open the full document page
 - Minimal web UI for quick local search
 
@@ -51,6 +52,7 @@ python main.py INDEX docs
 This generates/updates:
 
 - `word_counts.json` (main index file)
+- `click_counts.json` (created automatically after tracked result clicks)
 
 ## 4. Run the App
 
@@ -84,11 +86,13 @@ Then open:
   - Term frequency is computed from index counts.
   - IDF is computed across all indexed documents.
   - A BM25-style normalization reduces long-document bias.
+  - Stored click counts add a boost so repeatedly opened results can rank higher.
 - Results are sorted by relevance and returned to the template.
 
 ### Document serving
 
 - Search results include a path to the matched doc.
+- Result clicks are tracked before redirecting to the document.
 - `/docs/<path>` safely serves files from the local `docs/` directory.
 - Clicking a result opens that exact documentation page.
 
