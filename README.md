@@ -1,6 +1,6 @@
 # Scout
 
-A local documentation search app built with Flask.
+A local documentation search app built with Flask. and Machine learning (NLP)
 
 It indexes HTML files (for example, the `docs/` folder), then lets you search and open relevant pages in the browser.
 
